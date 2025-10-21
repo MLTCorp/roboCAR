@@ -23,7 +23,10 @@
       "Bash(powershell -Command \"Expand-Archive -Path ''MS-5007901-C252AF6443F04FC3BDCFC7AFD3357053.zip'' -DestinationPath ''./test_extract'' -Force\")",
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git rm:*)",
+      "mcp__supabase__apply_migration",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
