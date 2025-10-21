@@ -111,3 +111,7 @@ Thumbs.db
 
 # Logs
 logs/
+
+# Claude and Playwright temp files
+.claude/
+.playwright-mcp/
