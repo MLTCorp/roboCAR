@@ -26,7 +26,18 @@
       "Bash(git commit:*)",
       "Bash(git rm:*)",
       "mcp__supabase__apply_migration",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(if [ -f .env ])",
+      "Bash(then echo \"Arquivo .env existe\")",
+      "Bash(cat:*)",
+      "Bash(else echo \"Arquivo .env NAO existe\")",
+      "Bash(fi)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker stop:*)",
+      "Bash(docker-compose down:*)",
+      "mcp__supabase__execute_sql"
     ],
     "deny": [],
     "ask": []

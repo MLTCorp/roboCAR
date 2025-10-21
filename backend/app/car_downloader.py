@@ -84,6 +84,7 @@ async def download_car_websocket(
     pasta_destino: str,
     resolver_captcha: Callable[[bytes], str],
     enviar_progresso: Optional[Callable[[str, str], None]] = None,
+    callback_dados_extraidos: Optional[Callable[[Dict[str, Any]], None]] = None,
     headless: bool = True,
     slow_mo: int = 100
 ) -> Dict[str, Any]:
@@ -215,6 +216,15 @@ async def download_car_websocket(
                 await demo_page.close()
             except Exception as e:
                 logger.error(f"Erro ao extrair demonstrativo: {e}")
+
+            # CALLBACK: Dados extraídos (popup + demonstrativo) ANTES do shapefile
+            if callback_dados_extraidos:
+                logger.info("Chamando callback com dados extraídos (antes do shapefile)...")
+                await callback_dados_extraidos({
+                    'numero_car': numero_car,
+                    'info_popup': resultados['info_popup'],
+                    'dados_demonstrativo': resultados['dados_demonstrativo']
+                })
 
             await page.bring_to_front()
             await asyncio.sleep(2)

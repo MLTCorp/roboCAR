@@ -167,6 +167,28 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
             progress_msg = ProgressMessage(etapa=etapa, mensagem=mensagem)
             await websocket.send_json(progress_msg.model_dump())
 
+        # Callback para salvar dados assim que demonstrativo for extraído
+        async def salvar_dados_demonstrativo(dados: dict):
+            """Salva dados do popup + demonstrativo ANTES de tentar o shapefile"""
+            logger.info("📊 SALVANDO dados do demonstrativo no Supabase (ANTES do shapefile)...")
+
+            try:
+                supabase_client.table("consultas_car").update({
+                    "status_cadastro": dados["info_popup"].get("Status do Cadastro"),
+                    "tipo_imovel": dados["info_popup"].get("Tipo de imóvel"),
+                    "municipio": dados["info_popup"].get("Município"),
+                    "area_total": dados["info_popup"].get("Área"),
+                    "dados_demonstrativo": dados.get("dados_demonstrativo"),
+                    # Status ainda é 'processando' pois falta o shapefile
+                }).eq("id", consulta_id).execute()
+
+                logger.info("✅ Dados do demonstrativo salvos com sucesso!")
+                await enviar_progresso("dados_salvos", "Dados do demonstrativo salvos no banco")
+
+            except Exception as e:
+                logger.error(f"Erro ao salvar dados do demonstrativo: {e}")
+                # Não falhar a consulta por erro ao salvar
+
         # Executar download
         logger.info("Iniciando download CAR...")
         resultados = await download_car_websocket(
@@ -174,6 +196,7 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
             pasta_destino=temp_dir,
             resolver_captcha=resolver_captcha_remoto,
             enviar_progresso=enviar_progresso,
+            callback_dados_extraidos=salvar_dados_demonstrativo,
             headless=settings.headless,
             slow_mo=settings.slow_mo
         )
@@ -212,15 +235,10 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
                 logger.error(f"Erro ao fazer upload do shapefile: {e}")
                 # Não falhar a consulta se o upload falhar
 
-        # Atualizar registro no Supabase
-        logger.info("Atualizando registro no Supabase...")
+        # Atualizar registro no Supabase (dados já foram salvos, só atualizar shapefile e status)
+        logger.info("Atualizando registro no Supabase com shapefile...")
         supabase_client.table("consultas_car").update({
             "status": "concluido",
-            "status_cadastro": resultados["info_popup"].get("Status do Cadastro"),
-            "tipo_imovel": resultados["info_popup"].get("Tipo de imóvel"),
-            "municipio": resultados["info_popup"].get("Município"),
-            "area_total": resultados["info_popup"].get("Área"),
-            "dados_demonstrativo": resultados.get("dados_demonstrativo"),
             "shapefile_url": shapefile_url,
             "shapefile_size": shapefile_size,
             "consulta_concluida_em": datetime.utcnow().isoformat()
@@ -252,13 +270,24 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
     except Exception as e:
         logger.error(f"Erro no processamento do CAR {numero_car}: {e}", exc_info=True)
 
-        # Salvar erro no Supabase
+        # Verificar se é erro no CAPTCHA/shapefile (dados do demonstrativo já foram salvos)
+        erro_msg = str(e).lower()
         if consulta_id:
-            supabase_client.table("consultas_car").update({
-                "status": "erro",
-                "erro_mensagem": str(e),
-                "consulta_concluida_em": datetime.utcnow().isoformat()
-            }).eq("id", consulta_id).execute()
+            if "captcha" in erro_msg or "shapefile" in erro_msg:
+                # Erro só no shapefile, dados do demonstrativo já estão salvos
+                logger.warning("Erro no shapefile, mas dados do demonstrativo já foram salvos")
+                supabase_client.table("consultas_car").update({
+                    "status": "concluido_sem_shapefile",
+                    "erro_mensagem": f"Shapefile não baixado: {str(e)}",
+                    "consulta_concluida_em": datetime.utcnow().isoformat()
+                }).eq("id", consulta_id).execute()
+            else:
+                # Erro geral antes de salvar dados
+                supabase_client.table("consultas_car").update({
+                    "status": "erro",
+                    "erro_mensagem": str(e),
+                    "consulta_concluida_em": datetime.utcnow().isoformat()
+                }).eq("id", consulta_id).execute()
 
         # Enviar erro para cliente
         try:
