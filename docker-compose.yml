@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  robocar-backend:
+    build: ./backend
+    container_name: robocar-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - WEBSOCKET_TIMEOUT=${WEBSOCKET_TIMEOUT:-900}
+      - ENABLE_RATE_LIMIT=${ENABLE_RATE_LIMIT:-false}
+      - MAX_CONSULTAS_POR_DIA=${MAX_CONSULTAS_POR_DIA:-100}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - HEADLESS=${HEADLESS:-true}
+      - SLOW_MO=${SLOW_MO:-100}
+    volumes:
+      - /tmp/car_downloads:/tmp/car_downloads
+    networks:
+      - robocar-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  nginx:
+    image: nginx:alpine
+    container_name: robocar-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - robocar-backend
+    networks:
+      - robocar-network
+
+networks:
+  robocar-network:
+    driver: bridge

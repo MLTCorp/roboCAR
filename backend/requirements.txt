@@ -1,0 +1,23 @@
+# FastAPI
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+websockets==12.0
+python-multipart==0.0.6
+
+# Playwright
+playwright==1.41.0
+
+# Supabase
+supabase==2.3.4
+
+# Utils
+python-dotenv==1.0.1
+pydantic==2.5.3
+pydantic-settings==2.1.0
+aiofiles==23.2.1
+
+# Image processing (CAPTCHA)
+pillow==10.2.0
+
+# Logging
+python-json-logger==2.0.7
