@@ -10,6 +10,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 from typing import Callable, Optional, Dict, Any
 import logging
+from .shapefile_processor import processar_shapefile_car
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,7 @@ async def download_car_websocket(
         'info_popup': {},
         'dados_demonstrativo': {},
         'arquivo_shapefile': None,
+        'geojson_layers': {},
         'sucesso': False
     }
 
@@ -384,6 +386,29 @@ async def download_car_websocket(
                     resultados['shapefile_size'] = int(file_size)
 
                     logger.info(f"Shapefile salvo: {shapefile_path} ({file_size:.2f} KB)")
+
+                    # PROCESSAR SHAPEFILE -> GEOJSON
+                    try:
+                        if enviar_progresso:
+                            await enviar_progresso("processamento", "Processando shapefiles e convertendo para GeoJSON...")
+
+                        logger.info("Iniciando processamento de shapefiles...")
+
+                        # Executar em thread separada para não bloquear o event loop
+                        geojson_layers = await asyncio.to_thread(
+                            processar_shapefile_car,
+                            shapefile_path
+                        )
+
+                        resultados['geojson_layers'] = geojson_layers
+
+                        logger.info(f"✓ {len(geojson_layers)} camadas GeoJSON extraídas: {list(geojson_layers.keys())}")
+
+                    except Exception as e:
+                        logger.error(f"Erro ao processar shapefile para GeoJSON: {e}", exc_info=True)
+                        # Não falhar a consulta por causa disso
+                        resultados['geojson_layers'] = {}
+
                 else:
                     logger.warning("Resposta do shapefile não capturada")
 

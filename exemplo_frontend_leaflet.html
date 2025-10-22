@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualização CAR - Leaflet.js</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            z-index: 1000;
+            max-width: 300px;
+        }
+        .legend {
+            margin-top: 10px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <div class="info-panel">
+        <h3>CAR: PI-2202307...</h3>
+        <p id="info">Carregando...</p>
+
+        <div class="legend">
+            <h4>Legenda</h4>
+            <div class="legend-item">
+                <div class="legend-color" style="background: rgba(0, 255, 0, 0.3); border-color: #00ff00;"></div>
+                <span>Área do Imóvel</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: rgba(255, 165, 0, 0.3); border-color: #ffa500;"></div>
+                <span>Cobertura do Solo</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: rgba(255, 255, 0, 0.3); border-color: #ffff00;"></div>
+                <span>Reserva Legal</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // Configuração do Supabase
+        const SUPABASE_URL = 'https://fdjqphpsbpoumjsvaqit.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkanFwaHBzYnBvdW1qc3ZhcWl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU1MTcwODQsImV4cCI6MjA3MTA5MzA4NH0.sroT5ZPNGg4xRXmNNNuS_vxRJNOjNSAtGPvU5Lp6wfE';
+        const CONSULTA_ID = 'b2b17225-42ec-45b4-9cba-caf9f181d8b7';
+
+        // Criar mapa
+        const map = L.map('map').setView([-8.5, -42.8], 10);
+
+        // Adicionar tile layer (OpenStreetMap)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Estilos para cada camada
+        const layerStyles = {
+            area_do_imovel: {
+                color: '#00ff00',
+                weight: 2,
+                fillOpacity: 0.3,
+                fillColor: '#00ff00'
+            },
+            cobertura_do_solo: {
+                color: '#ffa500',
+                weight: 2,
+                fillOpacity: 0.3,
+                fillColor: '#ffa500'
+            },
+            reserva_legal: {
+                color: '#ffff00',
+                weight: 2,
+                fillOpacity: 0.3,
+                fillColor: '#ffff00'
+            }
+        };
+
+        // Buscar dados do Supabase
+        async function carregarCAR() {
+            try {
+                const response = await fetch(
+                    `${SUPABASE_URL}/rest/v1/duploa_consultas_car?id=eq.${CONSULTA_ID}&select=*`,
+                    {
+                        headers: {
+                            'apikey': SUPABASE_ANON_KEY,
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                        }
+                    }
+                );
+
+                const data = await response.json();
+
+                if (data.length === 0) {
+                    document.getElementById('info').textContent = 'Consulta não encontrada';
+                    return;
+                }
+
+                const consulta = data[0];
+                const geojsonLayers = consulta.geojson_layers;
+
+                // Atualizar info
+                document.getElementById('info').innerHTML = `
+                    <strong>Município:</strong> ${consulta.municipio}<br>
+                    <strong>Área:</strong> ${consulta.area_total}<br>
+                    <strong>Status:</strong> ${consulta.status_cadastro}
+                `;
+
+                if (!geojsonLayers) {
+                    document.getElementById('info').innerHTML += '<br><em>GeoJSON não disponível</em>';
+                    return;
+                }
+
+                // Grupo para ajustar bounds
+                const allLayers = [];
+
+                // Adicionar cada camada ao mapa
+                Object.entries(geojsonLayers).forEach(([layerName, geojson]) => {
+                    console.log(`Adicionando camada: ${layerName}`, geojson);
+
+                    const layer = L.geoJSON(geojson, {
+                        style: layerStyles[layerName] || {
+                            color: '#0000ff',
+                            weight: 2,
+                            fillOpacity: 0.3
+                        },
+                        onEachFeature: (feature, layer) => {
+                            // Adicionar popup com informações
+                            const props = feature.properties || {};
+                            const propsList = Object.entries(props)
+                                .map(([key, value]) => `<b>${key}:</b> ${value}`)
+                                .join('<br>');
+
+                            layer.bindPopup(`
+                                <h4>${layerName.replace(/_/g, ' ').toUpperCase()}</h4>
+                                ${propsList || '<em>Sem propriedades</em>'}
+                            `);
+                        }
+                    }).addTo(map);
+
+                    allLayers.push(layer);
+                });
+
+                // Ajustar zoom para mostrar todas as camadas
+                if (allLayers.length > 0) {
+                    const group = L.featureGroup(allLayers);
+                    map.fitBounds(group.getBounds(), { padding: [50, 50] });
+                }
+
+            } catch (error) {
+                console.error('Erro ao carregar CAR:', error);
+                document.getElementById('info').textContent = 'Erro ao carregar dados';
+            }
+        }
+
+        // Carregar ao iniciar
+        carregarCAR();
+    </script>
+</body>
+</html>

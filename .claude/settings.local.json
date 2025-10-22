@@ -38,7 +38,11 @@
       "Bash(docker stop:*)",
       "Bash(docker-compose down:*)",
       "mcp__supabase__execute_sql",
-      "mcp__supabase__list_tables"
+      "mcp__supabase__list_tables",
+      "Bash(powershell -Command \"Copy-Item .env backend/.env\")",
+      "Bash(powershell -Command \"Start-Sleep -Seconds 5\")",
+      "Bash(powershell -Command \"Start-Sleep -Seconds 10\")",
+      "Bash(powershell -Command \"Start-Sleep -Seconds 3\")"
     ],
     "deny": [],
     "ask": []

@@ -99,8 +99,11 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
     4. Cliente responde { "captcha_text": "ABC123" }
     5. Backend continua e envia { "type": "completed", ... }
     """
+    print(f"\n=== [WS] Nova conexao WebSocket para CAR: {numero_car} ===")
+    logger.info(f"[WS] Nova conexao WebSocket para CAR: {numero_car}")
     await websocket.accept()
-    logger.info(f"WebSocket conectado para CAR: {numero_car}")
+    print(f"=== [WS] WebSocket aceita para CAR: {numero_car} ===\n")
+    logger.info(f"[WS] WebSocket aceita para CAR: {numero_car}")
 
     cliente_id = None
     consulta_id = None
@@ -108,13 +111,18 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
 
     try:
         # Receber configuração inicial
+        print(f"=== [WS] Aguardando configuracao inicial... ===")
+        logger.info(f"[WS] Aguardando configuracao inicial...")
         config = await websocket.receive_json()
+        print(f"=== [WS] Configuracao recebida: {config} ===")
+        logger.info(f"[WS] Configuracao recebida: {config}")
         cliente_id = config.get("cliente_id")
 
         if not cliente_id:
+            logger.error(f"[WS] cliente_id nao fornecido!")
             raise ValueError("cliente_id não fornecido")
 
-        logger.info(f"Cliente ID: {cliente_id}")
+        logger.info(f"[WS] Cliente ID: {cliente_id}")
 
         # Criar registro no Supabase
         consulta = supabase_client.table("duploa_consultas_car").insert({
@@ -235,12 +243,13 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
                 logger.error(f"Erro ao fazer upload do shapefile: {e}")
                 # Não falhar a consulta se o upload falhar
 
-        # Atualizar registro no Supabase (dados já foram salvos, só atualizar shapefile e status)
-        logger.info("Atualizando registro no Supabase com shapefile...")
+        # Atualizar registro no Supabase (dados já foram salvos, só atualizar shapefile, geojson e status)
+        logger.info("Atualizando registro no Supabase com shapefile e GeoJSON layers...")
         supabase_client.table("duploa_consultas_car").update({
             "status": "concluido",
             "shapefile_url": shapefile_url,
             "shapefile_size": shapefile_size,
+            "geojson_layers": resultados.get("geojson_layers", {}),
             "consulta_concluida_em": datetime.utcnow().isoformat()
         }).eq("id", consulta_id).execute()
 
