@@ -23,7 +23,7 @@ Frontend (Vercel)  ←→  Backend API (Hetzner Docker)  ←→  Supabase
    - WebSocket client
 
 3. **Supabase**
-   - Tabela `consultas_car`
+   - Tabela `duploa_consultas_car`
    - Storage para shapefiles
 
 ---

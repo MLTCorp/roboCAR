@@ -13,7 +13,7 @@
 - [x] Script de teste (test_supabase.py)
 
 ❌ **Pendente:**
-- [ ] Criar tabela `consultas_car` no Supabase
+- [ ] Criar tabela `duploa_consultas_car` no Supabase
 - [ ] Testar conexão completa (rodar test_supabase.py)
 - [ ] Fazer commit das configurações do Supabase
 - [ ] Fazer push para GitHub
@@ -24,7 +24,7 @@
 
 ## Tarefas Detalhadas
 
-### 1. ⚠️ CRIAR TABELA `consultas_car` NO SUPABASE
+### 1. ⚠️ CRIAR TABELA `duploa_consultas_car` NO SUPABASE
 
 **Usando MCP do Supabase (RECOMENDADO):**
 
@@ -42,7 +42,7 @@ supabase = create_client(
 
 # Executar SQL
 sql = """
-CREATE TABLE IF NOT EXISTS consultas_car (
+CREATE TABLE IF NOT EXISTS duploa_consultas_car (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   cliente_id UUID NOT NULL,
   numero_car TEXT NOT NULL,
@@ -62,9 +62,9 @@ CREATE TABLE IF NOT EXISTS consultas_car (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_consultas_car_cliente ON consultas_car(cliente_id);
-CREATE INDEX IF NOT EXISTS idx_consultas_car_numero ON consultas_car(numero_car);
-CREATE INDEX IF NOT EXISTS idx_consultas_car_status ON consultas_car(status);
+CREATE INDEX IF NOT EXISTS idx_duploa_consultas_car_cliente ON duploa_consultas_car(cliente_id);
+CREATE INDEX IF NOT EXISTS idx_duploa_consultas_car_numero ON duploa_consultas_car(numero_car);
+CREATE INDEX IF NOT EXISTS idx_duploa_consultas_car_status ON duploa_consultas_car(status);
 
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -74,8 +74,8 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER update_consultas_car_updated_at
-BEFORE UPDATE ON consultas_car
+CREATE TRIGGER update_duploa_consultas_car_updated_at
+BEFORE UPDATE ON duploa_consultas_car
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 """
 
@@ -120,7 +120,7 @@ git add .env supabase-setup.sql SUPABASE_SETUP.md test_supabase.py TODO.md
 git commit -m "feat: configuração Supabase completa
 
 - Credenciais configuradas em .env
-- Script SQL para criar tabela consultas_car
+- Script SQL para criar tabela duploa_consultas_car
 - Bucket car-shapefiles criado
 - Script de teste de conexão
 - Documentação completa
@@ -387,7 +387,7 @@ git push origin master
 
 - ⚠️ Arquivo `.env` **NÃO** deve ser commitado
 - ✅ Bucket `car-shapefiles` já está criado
-- ⚠️ Tabela `consultas_car` ainda precisa ser criada
+- ⚠️ Tabela `duploa_consultas_car` ainda precisa ser criada
 - ✅ Código do backend está completo e testável
 - ⚠️ Frontend ainda não foi criado
 

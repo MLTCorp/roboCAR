@@ -70,7 +70,7 @@ async def health_check():
 
     # Verificar Supabase
     try:
-        supabase_client.table("consultas_car").select("id").limit(1).execute()
+        supabase_client.table("duploa_consultas_car").select("id").limit(1).execute()
         checks["supabase"] = "ok"
     except Exception as e:
         checks["supabase"] = "error"
@@ -117,7 +117,7 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
         logger.info(f"Cliente ID: {cliente_id}")
 
         # Criar registro no Supabase
-        consulta = supabase_client.table("consultas_car").insert({
+        consulta = supabase_client.table("duploa_consultas_car").insert({
             "cliente_id": cliente_id,
             "numero_car": numero_car,
             "status": "processando",
@@ -173,7 +173,7 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
             logger.info("📊 SALVANDO dados do demonstrativo no Supabase (ANTES do shapefile)...")
 
             try:
-                supabase_client.table("consultas_car").update({
+                supabase_client.table("duploa_consultas_car").update({
                     "status_cadastro": dados["info_popup"].get("Status do Cadastro"),
                     "tipo_imovel": dados["info_popup"].get("Tipo de imóvel"),
                     "municipio": dados["info_popup"].get("Município"),
@@ -237,7 +237,7 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
 
         # Atualizar registro no Supabase (dados já foram salvos, só atualizar shapefile e status)
         logger.info("Atualizando registro no Supabase com shapefile...")
-        supabase_client.table("consultas_car").update({
+        supabase_client.table("duploa_consultas_car").update({
             "status": "concluido",
             "shapefile_url": shapefile_url,
             "shapefile_size": shapefile_size,
@@ -262,7 +262,7 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
 
         # Atualizar status no Supabase
         if consulta_id:
-            supabase_client.table("consultas_car").update({
+            supabase_client.table("duploa_consultas_car").update({
                 "status": "erro",
                 "erro_mensagem": "Conexão WebSocket interrompida"
             }).eq("id", consulta_id).execute()
@@ -276,14 +276,14 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
             if "captcha" in erro_msg or "shapefile" in erro_msg:
                 # Erro só no shapefile, dados do demonstrativo já estão salvos
                 logger.warning("Erro no shapefile, mas dados do demonstrativo já foram salvos")
-                supabase_client.table("consultas_car").update({
+                supabase_client.table("duploa_consultas_car").update({
                     "status": "concluido_sem_shapefile",
                     "erro_mensagem": f"Shapefile não baixado: {str(e)}",
                     "consulta_concluida_em": datetime.utcnow().isoformat()
                 }).eq("id", consulta_id).execute()
             else:
                 # Erro geral antes de salvar dados
-                supabase_client.table("consultas_car").update({
+                supabase_client.table("duploa_consultas_car").update({
                     "status": "erro",
                     "erro_mensagem": str(e),
                     "consulta_concluida_em": datetime.utcnow().isoformat()
@@ -300,6 +300,18 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
             pass  # WebSocket pode já estar fechado
 
     finally:
+        # Copiar screenshot de debug antes de remover diretório
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                debug_screenshot = os.path.join(temp_dir, "debug_before_shapefile.png")
+                if os.path.exists(debug_screenshot):
+                    # Copiar para diretório atual
+                    debug_dest = f"debug_{consulta_id}.png"
+                    shutil.copy2(debug_screenshot, debug_dest)
+                    logger.info(f"Screenshot de debug copiado para: {debug_dest}")
+            except Exception as e:
+                logger.warning(f"Erro ao copiar screenshot de debug: {e}")
+
         # Limpar diretório temporário
         if temp_dir and os.path.exists(temp_dir):
             try:

@@ -1,6 +1,6 @@
 # Configuração do Supabase para roboCAR
 
-## 1. Criar Tabela `consultas_car`
+## 1. Criar Tabela `duploa_consultas_car`
 
 ### Via SQL Editor:
 
@@ -80,7 +80,7 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Testar insert
-result = supabase.table("consultas_car").insert({
+result = supabase.table("duploa_consultas_car").insert({
     "cliente_id": "00000000-0000-0000-0000-000000000000",
     "numero_car": "TESTE-123",
     "status": "processando"
@@ -89,7 +89,7 @@ result = supabase.table("consultas_car").insert({
 print("Teste de insert:", result)
 
 # Testar select
-result = supabase.table("consultas_car").select("*").limit(1).execute()
+result = supabase.table("duploa_consultas_car").select("*").limit(1).execute()
 print("Teste de select:", result)
 ```
 
@@ -97,7 +97,7 @@ print("Teste de select:", result)
 
 ```bash
 # Testar insert
-curl -X POST https://fdjqphpsbpoumjsvaqit.supabase.co/rest/v1/consultas_car \
+curl -X POST https://fdjqphpsbpoumjsvaqit.supabase.co/rest/v1/duploa_consultas_car \
   -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
   -H "Content-Type: application/json" \
@@ -108,7 +108,7 @@ curl -X POST https://fdjqphpsbpoumjsvaqit.supabase.co/rest/v1/consultas_car \
   }'
 
 # Testar select
-curl https://fdjqphpsbpoumjsvaqit.supabase.co/rest/v1/consultas_car?limit=1 \
+curl https://fdjqphpsbpoumjsvaqit.supabase.co/rest/v1/duploa_consultas_car?limit=1 \
   -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
@@ -119,7 +119,7 @@ curl https://fdjqphpsbpoumjsvaqit.supabase.co/rest/v1/consultas_car?limit=1 \
 
 Checklist:
 
-- [ ] Tabela `consultas_car` criada
+- [ ] Tabela `duploa_consultas_car` criada
 - [ ] Índices criados
 - [ ] Trigger `updated_at` funcionando
 - [ ] Bucket `car-shapefiles` criado
@@ -141,7 +141,7 @@ Checklist:
 
 ## Troubleshooting
 
-### Erro: "permission denied for table consultas_car"
+### Erro: "permission denied for table duploa_consultas_car"
 
 - Verificar se está usando o `service_role` key, não o `anon` key
 - Verificar RLS (Row Level Security)

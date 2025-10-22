@@ -3,8 +3,8 @@
 -- Execute este SQL no SQL Editor do Supabase
 -- ============================================
 
--- 1. Criar tabela consultas_car
-CREATE TABLE IF NOT EXISTS consultas_car (
+-- 1. Criar tabela duploa_consultas_car
+CREATE TABLE IF NOT EXISTS duploa_consultas_car (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   cliente_id UUID NOT NULL,
   numero_car TEXT NOT NULL,
@@ -35,10 +35,10 @@ CREATE TABLE IF NOT EXISTS consultas_car (
 );
 
 -- 2. Criar índices para performance
-CREATE INDEX IF NOT EXISTS idx_consultas_car_cliente ON consultas_car(cliente_id);
-CREATE INDEX IF NOT EXISTS idx_consultas_car_numero ON consultas_car(numero_car);
-CREATE INDEX IF NOT EXISTS idx_consultas_car_status ON consultas_car(status);
-CREATE INDEX IF NOT EXISTS idx_consultas_car_created_at ON consultas_car(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_duploa_consultas_car_cliente ON duploa_consultas_car(cliente_id);
+CREATE INDEX IF NOT EXISTS idx_duploa_consultas_car_numero ON duploa_consultas_car(numero_car);
+CREATE INDEX IF NOT EXISTS idx_duploa_consultas_car_status ON duploa_consultas_car(status);
+CREATE INDEX IF NOT EXISTS idx_duploa_consultas_car_created_at ON duploa_consultas_car(created_at DESC);
 
 -- 3. Criar trigger para atualizar updated_at automaticamente
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -49,29 +49,29 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER update_consultas_car_updated_at BEFORE UPDATE ON consultas_car
+CREATE TRIGGER update_duploa_consultas_car_updated_at BEFORE UPDATE ON duploa_consultas_car
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- 4. Habilitar RLS (Row Level Security) - opcional
--- ALTER TABLE consultas_car ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE duploa_consultas_car ENABLE ROW LEVEL SECURITY;
 
 -- 5. Política de acesso (exemplo - ajustar conforme necessário)
 -- CREATE POLICY "Usuários podem ver suas próprias consultas"
--- ON consultas_car FOR SELECT
+-- ON duploa_consultas_car FOR SELECT
 -- USING (auth.uid() = cliente_id);
 
 -- CREATE POLICY "Service role pode fazer tudo"
--- ON consultas_car FOR ALL
+-- ON duploa_consultas_car FOR ALL
 -- USING (auth.role() = 'service_role');
 
 -- ============================================
 -- Verificação
 -- ============================================
 -- Verificar se a tabela foi criada
-SELECT 'Tabela consultas_car criada com sucesso!' as status;
+SELECT 'Tabela duploa_consultas_car criada com sucesso!' as status;
 
 -- Ver estrutura da tabela
-\d consultas_car;
+\d duploa_consultas_car;
 
 -- ============================================
 -- STORAGE BUCKET

@@ -32,9 +32,9 @@ except Exception as e:
     exit(1)
 
 # Teste 1: Verificar se tabela existe
-print("\n[TESTE 1] Verificando tabela consultas_car...")
+print("\n[TESTE 1] Verificando tabela duploa_consultas_car...")
 try:
-    result = supabase.table("consultas_car").select("id").limit(1).execute()
+    result = supabase.table("duploa_consultas_car").select("id").limit(1).execute()
     print(f"[OK] Tabela existe! Registros encontrados: {len(result.data)}")
 except Exception as e:
     print(f"[ERRO] Tabela nao existe ou erro de acesso: {e}")
@@ -49,7 +49,7 @@ try:
         "status": "processando"
     }
 
-    result = supabase.table("consultas_car").insert(test_data).execute()
+    result = supabase.table("duploa_consultas_car").insert(test_data).execute()
 
     if result.data:
         print(f"[OK] Insert realizado com sucesso!")
@@ -67,7 +67,7 @@ except Exception as e:
 if test_id:
     print("\n[TESTE 3] Atualizando registro de teste...")
     try:
-        result = supabase.table("consultas_car").update({
+        result = supabase.table("duploa_consultas_car").update({
             "status": "concluido",
             "status_cadastro": "Teste OK"
         }).eq("id", test_id).execute()
@@ -81,7 +81,7 @@ if test_id:
 if test_id:
     print("\n[TESTE 4] Buscando registro de teste...")
     try:
-        result = supabase.table("consultas_car").select("*").eq("id", test_id).execute()
+        result = supabase.table("duploa_consultas_car").select("*").eq("id", test_id).execute()
 
         if result.data:
             print(f"[OK] Select realizado com sucesso!")
@@ -96,7 +96,7 @@ if test_id:
 if test_id:
     print("\n[TESTE 5] Deletando registro de teste...")
     try:
-        result = supabase.table("consultas_car").delete().eq("id", test_id).execute()
+        result = supabase.table("duploa_consultas_car").delete().eq("id", test_id).execute()
         print(f"[OK] Delete realizado com sucesso!")
 
     except Exception as e:

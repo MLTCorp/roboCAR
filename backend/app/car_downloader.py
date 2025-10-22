@@ -126,7 +126,7 @@ async def download_car_websocket(
         )
 
         context = await browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
+            viewport={'width': 2560, 'height': 1440},  # Viewport maior para garantir que todos elementos apareçam
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             accept_downloads=True
         )
@@ -172,7 +172,9 @@ async def download_car_websocket(
                 await enviar_progresso("extracao", "Extraindo dados básicos...")
 
             try:
+                logger.info("Aguardando popup aparecer...")
                 await page.wait_for_selector('.leaflet-popup-content', timeout=10000)
+                logger.info("Popup encontrado!")
                 popup_content = page.locator('.leaflet-popup-content').first
                 list_items = await popup_content.locator('li').all()
 
@@ -198,12 +200,25 @@ async def download_car_websocket(
                 await enviar_progresso("demonstrativo", "Abrindo demonstrativo e extraindo dados completos...")
 
             try:
+                logger.info("Procurando botão 'Demonstrativo'...")
                 demonstrativo_btn = page.locator('button:has-text("Demonstrativo")').first
+                count = await demonstrativo_btn.count()
+                logger.info(f"Botões 'Demonstrativo' encontrados: {count}")
+
+                if count == 0:
+                    logger.warning("Botão 'Demonstrativo' não encontrado, pulando extração...")
+                    raise Exception("Botão Demonstrativo não encontrado")
+
+                logger.info("Clicando no botão 'Demonstrativo'...")
                 async with context.expect_page() as new_page_info:
-                    await demonstrativo_btn.click()
+                    await demonstrativo_btn.click(timeout=10000)
 
                 demo_page = await new_page_info.value
-                await demo_page.wait_for_load_state('networkidle', timeout=30000)
+                logger.info("Nova página aberta, aguardando carregamento...")
+
+                # Usar domcontentloaded em vez de networkidle (mais rápido e confiável)
+                await demo_page.wait_for_load_state('domcontentloaded', timeout=15000)
+                logger.info("Página carregada!")
 
                 html_content = await demo_page.content()
 
@@ -235,14 +250,59 @@ async def download_car_websocket(
                 await enviar_progresso("shapefile", "Iniciando download do shapefile...")
 
             try:
-                download_shp_btn = page.locator('button:has-text("Realizar download shapefile")').first
-                await download_shp_btn.click()
+                # Debug: capturar screenshot antes de procurar botão
+                logger.info("Procurando botão de download shapefile...")
+
+                # Scroll para o final da página para garantir que botão esteja visível
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await asyncio.sleep(1)
+
+                debug_screenshot = os.path.join(pasta_destino, "debug_before_shapefile.png")
+                await page.screenshot(path=debug_screenshot, full_page=True)
+                logger.info(f"Screenshot salvo em: {debug_screenshot}")
+
+                # Tentar diferentes seletores para o botão (com case-insensitive e regex)
+                button_selectors = [
+                    'button:has-text("Realizar download shapefile")',
+                    'button:text-is("Realizar download shapefile")',
+                    'button:text-matches(".*download.*shapefile.*", "i")',
+                    'button:text-matches(".*shapefile.*", "i")',
+                    'button:has-text("shapefile")',
+                ]
+
+                download_shp_btn = None
+                for selector in button_selectors:
+                    logger.info(f"Tentando seletor: {selector}")
+                    locator = page.locator(selector)
+                    count = await locator.count()
+                    logger.info(f"  -> Elementos encontrados: {count}")
+
+                    if count > 0:
+                        download_shp_btn = locator.first
+                        logger.info(f"  -> ✓ Botão encontrado com seletor: {selector}")
+                        break
+
+                if not download_shp_btn:
+                    # Listar todos os botões visíveis para debug
+                    logger.error("Nenhum botão encontrado! Listando todos os botões da página...")
+                    all_buttons = await page.locator('button').all()
+                    for i, btn in enumerate(all_buttons[:10]):  # Primeiros 10 botões
+                        try:
+                            text = await btn.inner_text()
+                            logger.info(f"  Botão {i+1}: '{text}'")
+                        except:
+                            pass
+
+                    raise Exception("Botão de download shapefile não encontrado")
+
+                logger.info("Clicando no botão de download...")
+                await download_shp_btn.click(timeout=10000)
+                logger.info("Botão clicado, aguardando modal...")
                 await asyncio.sleep(3)
 
                 # Resolver CAPTCHA via callback
                 logger.info("Resolvendo CAPTCHA...")
-                if enviar_progresso:
-                    await enviar_progresso("captcha", "Aguardando resolução do CAPTCHA...")
+                # A mensagem captcha_required será enviada pelo callback resolver_captcha
 
                 captcha_selectors = [
                     'img[src*="Captcha"]',
@@ -253,20 +313,29 @@ async def download_car_websocket(
                 captcha_texto = None
                 for selector in captcha_selectors:
                     try:
+                        logger.info(f"Procurando CAPTCHA com seletor: {selector}")
                         count = await page.locator(selector).count()
+                        logger.info(f"Elementos encontrados: {count}")
+
                         if count > 0:
                             captcha_element = page.locator(selector).first
+                            logger.info("Aguardando CAPTCHA ficar visível...")
                             await captcha_element.wait_for(state='visible', timeout=10000)
 
                             # Capturar screenshot do CAPTCHA
+                            logger.info("Capturando screenshot do CAPTCHA...")
                             image_bytes = await captcha_element.screenshot()
+                            logger.info(f"Screenshot capturado: {len(image_bytes)} bytes")
 
                             # Chamar callback para resolver remotamente
+                            logger.info("Chamando callback resolver_captcha...")
                             captcha_texto = await resolver_captcha(image_bytes)
+                            logger.info(f"Callback retornou: {captcha_texto}")
 
                             if captcha_texto:
                                 break
-                    except:
+                    except Exception as e:
+                        logger.warning(f"Erro ao tentar seletor {selector}: {e}")
                         continue
 
                 if not captcha_texto:

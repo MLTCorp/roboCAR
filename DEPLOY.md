@@ -11,10 +11,10 @@
 
 ## 1. Configurar Supabase
 
-### Criar tabela `consultas_car`:
+### Criar tabela `duploa_consultas_car`:
 
 ```sql
-CREATE TABLE consultas_car (
+CREATE TABLE duploa_consultas_car (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   cliente_id UUID NOT NULL,
   numero_car TEXT NOT NULL,
@@ -42,9 +42,9 @@ CREATE TABLE consultas_car (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_consultas_car_cliente ON consultas_car(cliente_id);
-CREATE INDEX idx_consultas_car_numero ON consultas_car(numero_car);
-CREATE INDEX idx_consultas_car_status ON consultas_car(status);
+CREATE INDEX idx_duploa_consultas_car_cliente ON duploa_consultas_car(cliente_id);
+CREATE INDEX idx_duploa_consultas_car_numero ON duploa_consultas_car(numero_car);
+CREATE INDEX idx_duploa_consultas_car_status ON duploa_consultas_car(status);
 ```
 
 ### Criar bucket de storage `car-shapefiles`:
