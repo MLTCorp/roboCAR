@@ -479,42 +479,45 @@ async def download_car_websocket(
                             }
                         """)
 
-                        # Aguardar resposta
+                        # Aguardar resposta e verificar se download começou
                         await asyncio.sleep(8)
 
-                        # Verificar se CAPTCHA foi aceito (verificar se modal de erro apareceu)
-                        try:
-                            # Procurar por mensagens de erro comuns
-                            erro_captcha = await page.locator('text=/.*captcha.*incorreto.*/i').count()
-                            if erro_captcha > 0:
-                                raise Exception("CAPTCHA incorreto detectado")
+                        # Verificar se CAPTCHA foi aceito de múltiplas formas
+                        captcha_foi_aceito = False
 
-                            # Se não houver erro, considerar sucesso
-                            logger.info("✓ CAPTCHA aceito!")
-                            captcha_aceito = True
-                            break
+                        # 1. Verificar se há mensagem de erro de CAPTCHA
+                        erro_captcha_count = await page.locator('text=/.*captcha.*incorreto.*/i').count()
+                        erro_captcha_count += await page.locator('text=/.*código.*inválido.*/i').count()
+                        erro_captcha_count += await page.locator('text=/.*erro.*/i').count()
 
-                        except Exception as e:
-                            if "CAPTCHA incorreto" in str(e):
-                                logger.warning(f"CAPTCHA incorreto na tentativa {tentativa_captcha}")
+                        if erro_captcha_count > 0:
+                            logger.warning(f"CAPTCHA incorreto detectado na tentativa {tentativa_captcha}")
 
-                                if tentativa_captcha < max_tentativas_captcha:
-                                    logger.info("Gerando novo CAPTCHA...")
-                                    if enviar_progresso:
-                                        await enviar_progresso("captcha", f"CAPTCHA incorreto, tentando novamente ({tentativa_captcha + 1}/{max_tentativas_captcha})...")
+                            if tentativa_captcha < max_tentativas_captcha:
+                                logger.info("Gerando novo CAPTCHA...")
+                                if enviar_progresso:
+                                    await enviar_progresso("captcha", f"CAPTCHA incorreto, tentando novamente ({tentativa_captcha + 1}/{max_tentativas_captcha})...")
 
-                                    # Recarregar CAPTCHA (clicar no botão de refresh se existir, ou reabrir modal)
-                                    try:
-                                        refresh_btn = page.locator('button:has-text("Atualizar")').first
-                                        if await refresh_btn.count() > 0:
-                                            await refresh_btn.click()
-                                            await asyncio.sleep(2)
-                                    except:
+                                # Limpar campo de CAPTCHA
+                                try:
+                                    await input_captcha.fill('')
+                                except:
+                                    pass
+
+                                # Recarregar CAPTCHA (clicar no botão de refresh se existir, ou reabrir modal)
+                                try:
+                                    # Tentar botão de atualizar CAPTCHA
+                                    refresh_btn = page.locator('button:has-text("Atualizar"), a:has-text("Atualizar"), img[alt*="Atualizar"]').first
+                                    if await refresh_btn.count() > 0:
+                                        await refresh_btn.click()
+                                        await asyncio.sleep(2)
+                                        logger.info("CAPTCHA atualizado via botão")
+                                    else:
                                         # Se não houver botão refresh, fechar e reabrir modal
                                         logger.info("Reabrindo modal do CAPTCHA...")
                                         try:
                                             # Fechar modal
-                                            close_btn = page.locator('button.close, button:has-text("Fechar")').first
+                                            close_btn = page.locator('button.close, button:has-text("Fechar"), button:has-text("Cancelar")').first
                                             if await close_btn.count() > 0:
                                                 await close_btn.click()
                                                 await asyncio.sleep(2)
@@ -522,15 +525,64 @@ async def download_car_websocket(
                                             # Reabrir
                                             await download_shp_btn.click(timeout=10000)
                                             await asyncio.sleep(3)
-                                        except:
-                                            logger.warning("Não foi possível reabrir modal, continuando...")
+                                        except Exception as reopen_error:
+                                            logger.warning(f"Não foi possível reabrir modal: {reopen_error}")
+                                except Exception as refresh_error:
+                                    logger.warning(f"Erro ao atualizar CAPTCHA: {refresh_error}")
+
+                                continue  # Tentar novamente
+                            else:
+                                raise Exception(f"CAPTCHA incorreto após {max_tentativas_captcha} tentativas")
+
+                        # 2. Verificar se o shapefile_response foi capturado (sinal de sucesso)
+                        if shapefile_response is not None:
+                            logger.info("✓ CAPTCHA aceito! Shapefile response capturado")
+                            captcha_aceito = True
+                            break
+
+                        # 3. Verificar se modal ainda está aberto (se fechou = sucesso, se aberto = erro)
+                        try:
+                            modal_aberto = await page.locator('.modal.show, div[role="dialog"]').count()
+                            if modal_aberto == 0:
+                                # Modal fechou, provavelmente sucesso
+                                logger.info("✓ CAPTCHA aceito! Modal fechou")
+                                captcha_aceito = True
+                                break
+                            else:
+                                # Modal ainda aberto, CAPTCHA provavelmente errado
+                                logger.warning(f"Modal ainda aberto após tentativa {tentativa_captcha}, CAPTCHA pode estar incorreto")
+
+                                if tentativa_captcha < max_tentativas_captcha:
+                                    if enviar_progresso:
+                                        await enviar_progresso("captcha", f"CAPTCHA pode estar incorreto, tentando novamente ({tentativa_captcha + 1}/{max_tentativas_captcha})...")
+
+                                    # Aguardar mais um pouco para verificar se resposta chega
+                                    await asyncio.sleep(5)
+
+                                    # Verificar novamente se shapefile_response chegou
+                                    if shapefile_response is not None:
+                                        logger.info("✓ CAPTCHA aceito! Resposta chegou após espera adicional")
+                                        captcha_aceito = True
+                                        break
+
+                                    # Se ainda não chegou, tentar atualizar CAPTCHA
+                                    logger.info("Atualizando CAPTCHA para nova tentativa...")
+                                    try:
+                                        await input_captcha.fill('')
+                                        refresh_btn = page.locator('button:has-text("Atualizar"), a:has-text("Atualizar")').first
+                                        if await refresh_btn.count() > 0:
+                                            await refresh_btn.click()
+                                            await asyncio.sleep(2)
+                                    except:
+                                        pass
 
                                     continue
                                 else:
-                                    raise Exception(f"CAPTCHA incorreto após {max_tentativas_captcha} tentativas")
-                            else:
-                                # Outro tipo de erro, considerar sucesso (pode ser só timeout na verificação)
-                                logger.info("Nenhum erro detectado, assumindo CAPTCHA aceito")
+                                    raise Exception(f"CAPTCHA não aceito após {max_tentativas_captcha} tentativas")
+                        except Exception as modal_check_error:
+                            logger.warning(f"Erro ao verificar modal: {modal_check_error}")
+                            # Se houver erro ao verificar modal, assumir sucesso se shapefile_response foi capturado
+                            if shapefile_response is not None:
                                 captcha_aceito = True
                                 break
 
