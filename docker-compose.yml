@@ -19,30 +19,9 @@ services:
       - SLOW_MO=${SLOW_MO:-100}
     volumes:
       - /tmp/car_downloads:/tmp/car_downloads
-    networks:
-      - robocar-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  nginx:
-    image: nginx:alpine
-    container_name: robocar-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-    depends_on:
-      - robocar-backend
-    networks:
-      - robocar-network
-
-networks:
-  robocar-network:
-    driver: bridge
