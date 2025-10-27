@@ -15,6 +15,111 @@ from .shapefile_processor import processar_shapefile_car
 logger = logging.getLogger(__name__)
 
 
+async def tentar_abrir_popup_com_retry(
+    page,
+    numero_car: str,
+    max_tentativas: int = 3,
+    enviar_progresso: Optional[Callable[[str, str], None]] = None
+) -> dict:
+    """
+    Tenta abrir o popup do CAR com retry automático
+
+    Args:
+        page: Página do Playwright
+        numero_car: Número do CAR a buscar
+        max_tentativas: Número máximo de tentativas
+        enviar_progresso: Callback para enviar progresso
+
+    Returns:
+        Dict com dados extraídos do popup
+
+    Raises:
+        Exception: Se popup não abrir após todas as tentativas
+    """
+    timeouts = [20000, 40000, 60000]  # Timeouts progressivos
+    wait_times = [5, 10, 15]  # Tempos de espera entre tentativas
+
+    info_popup = {}
+
+    for tentativa in range(1, max_tentativas + 1):
+        try:
+            timeout_atual = timeouts[tentativa - 1] if tentativa <= len(timeouts) else timeouts[-1]
+
+            logger.info(f"Tentativa {tentativa}/{max_tentativas}: Aguardando popup aparecer (timeout {timeout_atual/1000}s)...")
+            if enviar_progresso:
+                await enviar_progresso("extracao", f"Tentando abrir popup (tentativa {tentativa}/{max_tentativas})...")
+
+            # Aguardar popup
+            await page.wait_for_selector('.leaflet-popup-content', timeout=timeout_atual)
+            logger.info(f"✓ Popup encontrado na tentativa {tentativa}!")
+
+            # Extrair dados do popup
+            popup_content = page.locator('.leaflet-popup-content').first
+            list_items = await popup_content.locator('li').all()
+
+            for item in list_items:
+                text = await item.inner_text()
+                if ':' in text:
+                    key, value = text.split(':', 1)
+                    info_popup[key.strip()] = value.strip()
+
+            try:
+                titulo = await popup_content.locator('h5, h6, strong').first.inner_text()
+                info_popup['Numero CAR'] = titulo
+            except:
+                pass
+
+            logger.info(f"{len(info_popup)} dados extraídos do popup")
+
+            if enviar_progresso:
+                await enviar_progresso("extracao", f"Popup aberto! {len(info_popup)} dados extraídos")
+
+            return info_popup
+
+        except Exception as e:
+            logger.warning(f"Tentativa {tentativa}/{max_tentativas} falhou: {e}")
+
+            # Se não for a última tentativa, tentar novamente
+            if tentativa < max_tentativas:
+                wait_time = wait_times[tentativa - 1] if tentativa <= len(wait_times) else wait_times[-1]
+
+                logger.info(f"Aguardando {wait_time}s antes de tentar novamente...")
+                if enviar_progresso:
+                    await enviar_progresso("extracao", f"Popup não abriu, tentando novamente em {wait_time}s (tentativa {tentativa + 1}/{max_tentativas})...")
+
+                await asyncio.sleep(wait_time)
+
+                # Recarregar página e refazer busca
+                logger.info("Recarregando página e refazendo busca...")
+                await page.reload(wait_until='domcontentloaded', timeout=90000)
+                await asyncio.sleep(10)
+
+                # Refazer busca
+                search_control = page.locator('.leaflet-control-search').first
+                await search_control.click()
+                await asyncio.sleep(2)
+
+                input_busca = page.locator('.leaflet-control-search input').first
+                await input_busca.click()
+                await input_busca.fill('')  # Limpar
+                await input_busca.press_sequentially(numero_car, delay=100)
+                await asyncio.sleep(1)
+                await input_busca.press("Enter")
+
+                # Aguardar progressivamente mais
+                await asyncio.sleep(wait_time)
+
+                # Scroll para garantir visibilidade
+                await page.evaluate("window.scrollTo(0, 0)")
+                await asyncio.sleep(2)
+            else:
+                # Última tentativa falhou
+                logger.error(f"Popup não abriu após {max_tentativas} tentativas")
+                raise Exception(f"Popup não abriu após {max_tentativas} tentativas. O site do CAR pode estar fora do ar ou o número CAR pode ser inválido.")
+
+    return info_popup
+
+
 async def extrair_dados_demonstrativo_html(html_content: str) -> dict:
     """Extrai todos os dados do demonstrativo organizados por tópicos"""
 
@@ -165,36 +270,34 @@ async def download_car_websocket(
             await input_busca.press_sequentially(numero_car, delay=100)
             await asyncio.sleep(1)
             await input_busca.press("Enter")
+
+            # Aguardar network idle para garantir que página carregou completamente
+            logger.info("Aguardando carregamento completo da página...")
+            try:
+                await page.wait_for_load_state('networkidle', timeout=10000)
+            except:
+                logger.warning("Timeout no networkidle, mas continuando...")
+
             await asyncio.sleep(5)
             logger.info("Busca concluída")
 
-            # ETAPA 2: POPUP
+            # ETAPA 2: POPUP (com retry automático)
             logger.info("Etapa 2/4: Extraindo dados do popup...")
             if enviar_progresso:
                 await enviar_progresso("extracao", "Extraindo dados básicos...")
 
             try:
-                logger.info("Aguardando popup aparecer...")
-                await page.wait_for_selector('.leaflet-popup-content', timeout=10000)
-                logger.info("Popup encontrado!")
-                popup_content = page.locator('.leaflet-popup-content').first
-                list_items = await popup_content.locator('li').all()
-
-                for item in list_items:
-                    text = await item.inner_text()
-                    if ':' in text:
-                        key, value = text.split(':', 1)
-                        resultados['info_popup'][key.strip()] = value.strip()
-
-                try:
-                    titulo = await popup_content.locator('h5, h6, strong').first.inner_text()
-                    resultados['info_popup']['Numero CAR'] = titulo
-                except:
-                    pass
-
-                logger.info(f"{len(resultados['info_popup'])} dados extraídos do popup")
+                # Usar função com retry automático
+                resultados['info_popup'] = await tentar_abrir_popup_com_retry(
+                    page=page,
+                    numero_car=numero_car,
+                    max_tentativas=3,
+                    enviar_progresso=enviar_progresso
+                )
             except Exception as e:
-                logger.error(f"Erro ao extrair popup: {e}")
+                logger.error(f"Erro ao extrair popup após todas as tentativas: {e}")
+                # Popup é crítico - se não abrir, não adianta continuar
+                raise
 
             # ETAPA 3: DEMONSTRATIVO
             logger.info("Etapa 3/4: Extraindo dados do demonstrativo...")
@@ -219,7 +322,7 @@ async def download_car_websocket(
                 logger.info("Nova página aberta, aguardando carregamento...")
 
                 # Usar domcontentloaded em vez de networkidle (mais rápido e confiável)
-                await demo_page.wait_for_load_state('domcontentloaded', timeout=15000)
+                await demo_page.wait_for_load_state('domcontentloaded', timeout=25000)
                 logger.info("Página carregada!")
 
                 html_content = await demo_page.content()
@@ -302,9 +405,8 @@ async def download_car_websocket(
                 logger.info("Botão clicado, aguardando modal...")
                 await asyncio.sleep(3)
 
-                # Resolver CAPTCHA via callback
+                # Resolver CAPTCHA via callback (com retry se errar)
                 logger.info("Resolvendo CAPTCHA...")
-                # A mensagem captcha_required será enviada pelo callback resolver_captcha
 
                 captcha_selectors = [
                     'img[src*="Captcha"]',
@@ -312,62 +414,137 @@ async def download_car_websocket(
                     'img[id="imagemCaptcha"]',
                 ]
 
-                captcha_texto = None
-                for selector in captcha_selectors:
+                max_tentativas_captcha = 3
+                captcha_aceito = False
+
+                for tentativa_captcha in range(1, max_tentativas_captcha + 1):
                     try:
-                        logger.info(f"Procurando CAPTCHA com seletor: {selector}")
-                        count = await page.locator(selector).count()
-                        logger.info(f"Elementos encontrados: {count}")
+                        logger.info(f"Resolvendo CAPTCHA (tentativa {tentativa_captcha}/{max_tentativas_captcha})...")
+                        if enviar_progresso:
+                            await enviar_progresso("captcha", f"Resolvendo CAPTCHA (tentativa {tentativa_captcha}/{max_tentativas_captcha})...")
 
-                        if count > 0:
-                            captcha_element = page.locator(selector).first
-                            logger.info("Aguardando CAPTCHA ficar visível...")
-                            await captcha_element.wait_for(state='visible', timeout=10000)
+                        captcha_texto = None
+                        captcha_element = None
 
-                            # Capturar screenshot do CAPTCHA
-                            logger.info("Capturando screenshot do CAPTCHA...")
-                            image_bytes = await captcha_element.screenshot()
-                            logger.info(f"Screenshot capturado: {len(image_bytes)} bytes")
+                        # Procurar elemento CAPTCHA
+                        for selector in captcha_selectors:
+                            try:
+                                logger.info(f"Procurando CAPTCHA com seletor: {selector}")
+                                count = await page.locator(selector).count()
+                                logger.info(f"Elementos encontrados: {count}")
 
-                            # Chamar callback para resolver remotamente
-                            logger.info("Chamando callback resolver_captcha...")
-                            captcha_texto = await resolver_captcha(image_bytes)
-                            logger.info(f"Callback retornou: {captcha_texto}")
+                                if count > 0:
+                                    captcha_element = page.locator(selector).first
+                                    logger.info("Aguardando CAPTCHA ficar visível...")
+                                    await captcha_element.wait_for(state='visible', timeout=15000)
 
-                            if captcha_texto:
+                                    # Capturar screenshot do CAPTCHA
+                                    logger.info("Capturando screenshot do CAPTCHA...")
+                                    image_bytes = await captcha_element.screenshot()
+                                    logger.info(f"Screenshot capturado: {len(image_bytes)} bytes")
+
+                                    # Chamar callback para resolver remotamente
+                                    logger.info("Chamando callback resolver_captcha...")
+                                    captcha_texto = await resolver_captcha(image_bytes)
+                                    logger.info(f"Callback retornou: {captcha_texto}")
+
+                                    if captcha_texto:
+                                        break
+                            except Exception as e:
+                                logger.warning(f"Erro ao tentar seletor {selector}: {e}")
+                                continue
+
+                        if not captcha_texto:
+                            raise Exception("CAPTCHA não resolvido")
+
+                        logger.info(f"CAPTCHA resolvido: {captcha_texto}")
+
+                        # Preencher campo
+                        await asyncio.sleep(1)
+                        input_captcha = page.locator('input[type="text"]').first
+                        await input_captcha.fill(captcha_texto)
+                        await asyncio.sleep(1)
+
+                        # Clicar no botão Download
+                        if enviar_progresso:
+                            await enviar_progresso("download", "Baixando shapefile...")
+
+                        await page.evaluate("""
+                            () => {
+                                const buttons = Array.from(document.querySelectorAll('button'));
+                                const downloadBtn = buttons.find(btn =>
+                                    btn.textContent.trim().toLowerCase() === 'download'
+                                );
+                                if (downloadBtn) downloadBtn.click();
+                            }
+                        """)
+
+                        # Aguardar resposta
+                        await asyncio.sleep(8)
+
+                        # Verificar se CAPTCHA foi aceito (verificar se modal de erro apareceu)
+                        try:
+                            # Procurar por mensagens de erro comuns
+                            erro_captcha = await page.locator('text=/.*captcha.*incorreto.*/i').count()
+                            if erro_captcha > 0:
+                                raise Exception("CAPTCHA incorreto detectado")
+
+                            # Se não houver erro, considerar sucesso
+                            logger.info("✓ CAPTCHA aceito!")
+                            captcha_aceito = True
+                            break
+
+                        except Exception as e:
+                            if "CAPTCHA incorreto" in str(e):
+                                logger.warning(f"CAPTCHA incorreto na tentativa {tentativa_captcha}")
+
+                                if tentativa_captcha < max_tentativas_captcha:
+                                    logger.info("Gerando novo CAPTCHA...")
+                                    if enviar_progresso:
+                                        await enviar_progresso("captcha", f"CAPTCHA incorreto, tentando novamente ({tentativa_captcha + 1}/{max_tentativas_captcha})...")
+
+                                    # Recarregar CAPTCHA (clicar no botão de refresh se existir, ou reabrir modal)
+                                    try:
+                                        refresh_btn = page.locator('button:has-text("Atualizar")').first
+                                        if await refresh_btn.count() > 0:
+                                            await refresh_btn.click()
+                                            await asyncio.sleep(2)
+                                    except:
+                                        # Se não houver botão refresh, fechar e reabrir modal
+                                        logger.info("Reabrindo modal do CAPTCHA...")
+                                        try:
+                                            # Fechar modal
+                                            close_btn = page.locator('button.close, button:has-text("Fechar")').first
+                                            if await close_btn.count() > 0:
+                                                await close_btn.click()
+                                                await asyncio.sleep(2)
+
+                                            # Reabrir
+                                            await download_shp_btn.click(timeout=10000)
+                                            await asyncio.sleep(3)
+                                        except:
+                                            logger.warning("Não foi possível reabrir modal, continuando...")
+
+                                    continue
+                                else:
+                                    raise Exception(f"CAPTCHA incorreto após {max_tentativas_captcha} tentativas")
+                            else:
+                                # Outro tipo de erro, considerar sucesso (pode ser só timeout na verificação)
+                                logger.info("Nenhum erro detectado, assumindo CAPTCHA aceito")
+                                captcha_aceito = True
                                 break
+
                     except Exception as e:
-                        logger.warning(f"Erro ao tentar seletor {selector}: {e}")
-                        continue
+                        if tentativa_captcha >= max_tentativas_captcha:
+                            logger.error(f"Erro no CAPTCHA após {max_tentativas_captcha} tentativas: {e}")
+                            raise
+                        else:
+                            logger.warning(f"Erro na tentativa {tentativa_captcha}, tentando novamente: {e}")
+                            await asyncio.sleep(2)
+                            continue
 
-                if not captcha_texto:
-                    raise Exception("CAPTCHA não resolvido")
-
-                logger.info(f"CAPTCHA resolvido: {captcha_texto}")
-
-                # Preencher campo
-                await asyncio.sleep(1)
-                input_captcha = page.locator('input[type="text"]').first
-                await input_captcha.fill(captcha_texto)
-
-                await asyncio.sleep(1)
-
-                # Clicar no botão Download
-                if enviar_progresso:
-                    await enviar_progresso("download", "Baixando shapefile...")
-
-                await page.evaluate("""
-                    () => {
-                        const buttons = Array.from(document.querySelectorAll('button'));
-                        const downloadBtn = buttons.find(btn =>
-                            btn.textContent.trim().toLowerCase() === 'download'
-                        );
-                        if (downloadBtn) downloadBtn.click();
-                    }
-                """)
-
-                # Aguardar resposta
-                await asyncio.sleep(5)
+                if not captcha_aceito:
+                    raise Exception("CAPTCHA não foi aceito após todas as tentativas")
 
                 # Verificar se capturamos a resposta
                 if shapefile_response:
