@@ -36,7 +36,7 @@ async def tentar_abrir_popup_com_retry(
     Raises:
         Exception: Se popup não abrir após todas as tentativas
     """
-    timeouts = [20000, 40000, 60000]  # Timeouts progressivos
+    timeouts = [30000, 45000, 60000]  # Timeouts progressivos (aumentados)
     wait_times = [5, 10, 15]  # Tempos de espera entre tentativas
 
     info_popup = {}
@@ -118,6 +118,106 @@ async def tentar_abrir_popup_com_retry(
                 raise Exception(f"Popup não abriu após {max_tentativas} tentativas. O site do CAR pode estar fora do ar ou o número CAR pode ser inválido.")
 
     return info_popup
+
+
+async def tentar_extrair_demonstrativo_com_retry(
+    page,
+    context,
+    max_tentativas: int = 3,
+    enviar_progresso: Optional[Callable[[str, str], None]] = None
+) -> dict:
+    """
+    Tenta extrair dados do demonstrativo com retry automático
+
+    Args:
+        page: Página principal do Playwright
+        context: Contexto do navegador
+        max_tentativas: Número máximo de tentativas
+        enviar_progresso: Callback para enviar progresso
+
+    Returns:
+        Dict com dados extraídos do demonstrativo
+
+    Raises:
+        Exception: Se demonstrativo não abrir após todas as tentativas
+    """
+    timeouts_click = [15000, 20000, 30000]  # Timeouts progressivos para o click
+    timeouts_load = [30000, 45000, 60000]   # Timeouts progressivos para carregar página
+    wait_times = [3, 5, 8]  # Tempos de espera entre tentativas
+
+    dados_demonstrativo = {}
+
+    for tentativa in range(1, max_tentativas + 1):
+        try:
+            timeout_click = timeouts_click[tentativa - 1] if tentativa <= len(timeouts_click) else timeouts_click[-1]
+            timeout_load = timeouts_load[tentativa - 1] if tentativa <= len(timeouts_load) else timeouts_load[-1]
+
+            logger.info(f"Tentativa {tentativa}/{max_tentativas}: Procurando botão 'Demonstrativo'...")
+            if enviar_progresso:
+                await enviar_progresso("demonstrativo", f"Abrindo demonstrativo (tentativa {tentativa}/{max_tentativas})...")
+
+            demonstrativo_btn = page.locator('button:has-text("Demonstrativo")').first
+            count = await demonstrativo_btn.count()
+            logger.info(f"Botões 'Demonstrativo' encontrados: {count}")
+
+            if count == 0:
+                logger.warning("Botão 'Demonstrativo' não encontrado")
+                raise Exception("Botão Demonstrativo não encontrado")
+
+            logger.info(f"Clicando no botão 'Demonstrativo' (timeout {timeout_click/1000}s)...")
+            async with context.expect_page() as new_page_info:
+                await demonstrativo_btn.click(timeout=timeout_click)
+
+            demo_page = await new_page_info.value
+            logger.info(f"Nova página aberta, aguardando carregamento (timeout {timeout_load/1000}s)...")
+
+            # Aguardar carregamento da página
+            await demo_page.wait_for_load_state('domcontentloaded', timeout=timeout_load)
+            logger.info("✓ Página do demonstrativo carregada!")
+
+            # Extrair conteúdo HTML
+            html_content = await demo_page.content()
+
+            # Extrair dados estruturados
+            dados_demonstrativo = await extrair_dados_demonstrativo_html(html_content)
+
+            logger.info(f"✓ Dados do demonstrativo extraídos com sucesso na tentativa {tentativa}")
+
+            if enviar_progresso:
+                await enviar_progresso("demonstrativo", "Demonstrativo extraído com sucesso!")
+
+            await demo_page.close()
+            return dados_demonstrativo
+
+        except Exception as e:
+            logger.warning(f"Tentativa {tentativa}/{max_tentativas} falhou: {e}")
+
+            # Fechar página do demo se ainda estiver aberta
+            try:
+                if 'demo_page' in locals():
+                    await demo_page.close()
+            except:
+                pass
+
+            # Se não for a última tentativa, aguardar e tentar novamente
+            if tentativa < max_tentativas:
+                wait_time = wait_times[tentativa - 1] if tentativa <= len(wait_times) else wait_times[-1]
+
+                logger.info(f"Aguardando {wait_time}s antes de tentar novamente...")
+                if enviar_progresso:
+                    await enviar_progresso("demonstrativo", f"Falha ao abrir demonstrativo, tentando novamente em {wait_time}s (tentativa {tentativa + 1}/{max_tentativas})...")
+
+                await asyncio.sleep(wait_time)
+
+                # Trazer página principal para frente
+                await page.bring_to_front()
+                await asyncio.sleep(2)
+            else:
+                # Última tentativa falhou
+                logger.error(f"Demonstrativo não abriu após {max_tentativas} tentativas")
+                raise Exception(f"Demonstrativo não abriu após {max_tentativas} tentativas: {e}")
+
+    return dados_demonstrativo
 
 
 async def extrair_dados_demonstrativo_html(html_content: str) -> dict:
@@ -258,7 +358,7 @@ async def download_car_websocket(
                 await enviar_progresso("busca", "Acessando site do CAR e buscando número...")
 
             await page.goto("https://consultapublica.car.gov.br/publico/imoveis/index",
-                           wait_until='domcontentloaded', timeout=90000)
+                           wait_until='domcontentloaded', timeout=120000)
             await asyncio.sleep(15)
 
             search_control = page.locator('.leaflet-control-search').first
@@ -274,7 +374,7 @@ async def download_car_websocket(
             # Aguardar network idle para garantir que página carregou completamente
             logger.info("Aguardando carregamento completo da página...")
             try:
-                await page.wait_for_load_state('networkidle', timeout=10000)
+                await page.wait_for_load_state('networkidle', timeout=20000)
             except:
                 logger.warning("Timeout no networkidle, mas continuando...")
 
@@ -299,43 +399,23 @@ async def download_car_websocket(
                 # Popup é crítico - se não abrir, não adianta continuar
                 raise
 
-            # ETAPA 3: DEMONSTRATIVO
+            # ETAPA 3: DEMONSTRATIVO (com retry automático)
             logger.info("Etapa 3/4: Extraindo dados do demonstrativo...")
             if enviar_progresso:
                 await enviar_progresso("demonstrativo", "Abrindo demonstrativo e extraindo dados completos...")
 
             try:
-                logger.info("Procurando botão 'Demonstrativo'...")
-                demonstrativo_btn = page.locator('button:has-text("Demonstrativo")').first
-                count = await demonstrativo_btn.count()
-                logger.info(f"Botões 'Demonstrativo' encontrados: {count}")
-
-                if count == 0:
-                    logger.warning("Botão 'Demonstrativo' não encontrado, pulando extração...")
-                    raise Exception("Botão Demonstrativo não encontrado")
-
-                logger.info("Clicando no botão 'Demonstrativo'...")
-                async with context.expect_page() as new_page_info:
-                    await demonstrativo_btn.click(timeout=10000)
-
-                demo_page = await new_page_info.value
-                logger.info("Nova página aberta, aguardando carregamento...")
-
-                # Usar domcontentloaded em vez de networkidle (mais rápido e confiável)
-                await demo_page.wait_for_load_state('domcontentloaded', timeout=25000)
-                logger.info("Página carregada!")
-
-                html_content = await demo_page.content()
-
-                # Extrair dados estruturados
-                dados_extraidos = await extrair_dados_demonstrativo_html(html_content)
-                resultados['dados_demonstrativo'] = dados_extraidos
-
-                logger.info(f"Dados do demonstrativo extraídos com sucesso")
-
-                await demo_page.close()
+                # Usar função com retry automático
+                resultados['dados_demonstrativo'] = await tentar_extrair_demonstrativo_com_retry(
+                    page=page,
+                    context=context,
+                    max_tentativas=3,
+                    enviar_progresso=enviar_progresso
+                )
             except Exception as e:
-                logger.error(f"Erro ao extrair demonstrativo: {e}")
+                logger.error(f"Erro ao extrair demonstrativo após todas as tentativas: {e}")
+                # Demonstrativo não é crítico - continuar mesmo se falhar
+                resultados['dados_demonstrativo'] = {}
 
             # CALLBACK: Dados extraídos (popup + demonstrativo) ANTES do shapefile
             if callback_dados_extraidos:
@@ -401,7 +481,7 @@ async def download_car_websocket(
                     raise Exception("Botão de download shapefile não encontrado")
 
                 logger.info("Clicando no botão de download...")
-                await download_shp_btn.click(timeout=10000)
+                await download_shp_btn.click(timeout=15000)
                 logger.info("Botão clicado, aguardando modal...")
                 await asyncio.sleep(3)
 
@@ -436,7 +516,7 @@ async def download_car_websocket(
                                 if count > 0:
                                     captcha_element = page.locator(selector).first
                                     logger.info("Aguardando CAPTCHA ficar visível...")
-                                    await captcha_element.wait_for(state='visible', timeout=15000)
+                                    await captcha_element.wait_for(state='visible', timeout=20000)
 
                                     # Capturar screenshot do CAPTCHA
                                     logger.info("Capturando screenshot do CAPTCHA...")
