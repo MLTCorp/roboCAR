@@ -559,8 +559,30 @@ async def download_car_websocket(
                             }
                         """)
 
-                        # Aguardar resposta e verificar se download começou
-                        await asyncio.sleep(8)
+                        # Aguardar resposta com polling (espera inteligente ao invés de tempo fixo)
+                        max_wait_for_response = 15  # segundos
+                        poll_interval = 1  # segundo
+                        waited = 0
+
+                        logger.info(f"Aguardando resposta do shapefile (máx {max_wait_for_response}s)...")
+                        while waited < max_wait_for_response:
+                            await asyncio.sleep(poll_interval)
+                            waited += poll_interval
+
+                            # Verificar se resposta já chegou
+                            if shapefile_response is not None:
+                                logger.info(f"✓ Resposta capturada após {waited}s de espera")
+                                break
+
+                            # Verificar se há erro de CAPTCHA
+                            erro_captcha_count = await page.locator('text=/.*captcha.*incorreto.*/i').count()
+                            erro_captcha_count += await page.locator('text=/.*código.*inválido.*/i').count()
+
+                            if erro_captcha_count > 0:
+                                logger.warning(f"Erro de CAPTCHA detectado após {waited}s")
+                                break
+
+                        logger.info(f"Polling finalizado após {waited}s (resposta capturada: {shapefile_response is not None})")
 
                         # Verificar se CAPTCHA foi aceito de múltiplas formas
                         captcha_foi_aceito = False
@@ -603,7 +625,7 @@ async def download_car_websocket(
                                                 await asyncio.sleep(2)
 
                                             # Reabrir
-                                            await download_shp_btn.click(timeout=10000)
+                                            await download_shp_btn.click(timeout=15000)
                                             await asyncio.sleep(3)
                                         except Exception as reopen_error:
                                             logger.warning(f"Não foi possível reabrir modal: {reopen_error}")
@@ -629,23 +651,26 @@ async def download_car_websocket(
                                 captcha_aceito = True
                                 break
                             else:
-                                # Modal ainda aberto, CAPTCHA provavelmente errado
-                                logger.warning(f"Modal ainda aberto após tentativa {tentativa_captcha}, CAPTCHA pode estar incorreto")
+                                # Modal ainda aberto após polling completo
+                                logger.warning(f"Modal ainda aberto após {max_wait_for_response}s de espera")
 
+                                # Se shapefile_response foi capturado durante o polling, considerar sucesso
+                                if shapefile_response is not None:
+                                    logger.info("✓ CAPTCHA aceito! Resposta capturada durante polling (modal ainda aberto)")
+                                    captcha_aceito = True
+                                    break
+
+                                # Se não capturou resposta E modal ainda aberto = ERRO DE CAPTCHA
                                 if tentativa_captcha < max_tentativas_captcha:
+                                    logger.error(f"❌ CAPTCHA INCORRETO detectado! (tentativa {tentativa_captcha}/{max_tentativas_captcha})")
+                                    logger.error(f"   → Modal ainda aberto após {max_wait_for_response}s")
+                                    logger.error(f"   → Shapefile não foi capturado")
+                                    logger.error(f"   → Conclusão: CAPTCHA digitado está errado")
+
                                     if enviar_progresso:
-                                        await enviar_progresso("captcha", f"CAPTCHA pode estar incorreto, tentando novamente ({tentativa_captcha + 1}/{max_tentativas_captcha})...")
+                                        await enviar_progresso("captcha", f"❌ CAPTCHA incorreto! Tentando novamente ({tentativa_captcha + 1}/{max_tentativas_captcha})...")
 
-                                    # Aguardar mais um pouco para verificar se resposta chega
-                                    await asyncio.sleep(5)
-
-                                    # Verificar novamente se shapefile_response chegou
-                                    if shapefile_response is not None:
-                                        logger.info("✓ CAPTCHA aceito! Resposta chegou após espera adicional")
-                                        captcha_aceito = True
-                                        break
-
-                                    # Se ainda não chegou, tentar atualizar CAPTCHA
+                                    # Tentar atualizar CAPTCHA
                                     logger.info("Atualizando CAPTCHA para nova tentativa...")
                                     try:
                                         await input_captcha.fill('')
@@ -658,7 +683,8 @@ async def download_car_websocket(
 
                                     continue
                                 else:
-                                    raise Exception(f"CAPTCHA não aceito após {max_tentativas_captcha} tentativas")
+                                    logger.error(f"❌ FALHA DEFINITIVA: CAPTCHA incorreto após {max_tentativas_captcha} tentativas")
+                                    raise Exception(f"CAPTCHA incorreto após {max_tentativas_captcha} tentativas - shapefile não foi capturado")
                         except Exception as modal_check_error:
                             logger.warning(f"Erro ao verificar modal: {modal_check_error}")
                             # Se houver erro ao verificar modal, assumir sucesso se shapefile_response foi capturado
@@ -675,10 +701,19 @@ async def download_car_websocket(
                             await asyncio.sleep(2)
                             continue
 
+                # VALIDAÇÃO FINAL: CAPTCHA só é considerado aceito se a resposta foi capturada
                 if not captcha_aceito:
+                    logger.error("CAPTCHA não foi aceito após todas as tentativas")
                     raise Exception("CAPTCHA não foi aceito após todas as tentativas")
 
-                # Verificar se capturamos a resposta
+                # VALIDAÇÃO CRÍTICA: Mesmo que CAPTCHA tenha sido "aceito",
+                # verificar se realmente capturamos o shapefile
+                if shapefile_response is None:
+                    logger.error("CAPTCHA foi aceito (modal fechou) mas shapefile não foi capturado!")
+                    logger.error("Isso pode indicar um problema no site do CAR ou erro de CAPTCHA não detectado")
+                    raise Exception("Shapefile não foi capturado após CAPTCHA aceito")
+
+                # Se chegou aqui, sucesso confirmado!
                 if shapefile_response:
                     logger.info("Resposta capturada! Salvando arquivo...")
 

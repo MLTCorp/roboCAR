@@ -24,6 +24,7 @@ from .models import (
 )
 from .car_downloader import download_car_websocket
 from .supabase_client import supabase_client
+from .utils import normalizar_numero_car, validar_formato_car
 
 # Configurar logging
 logging.basicConfig(
@@ -99,8 +100,20 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
     4. Cliente responde { "captcha_text": "ABC123" }
     5. Backend continua e envia { "type": "completed", ... }
     """
+    # NORMALIZAR número CAR (remover pontos)
+    numero_car_original = numero_car
+    numero_car = normalizar_numero_car(numero_car)
+
     print(f"\n=== [WS] Nova conexao WebSocket para CAR: {numero_car} ===")
     logger.info(f"[WS] Nova conexao WebSocket para CAR: {numero_car}")
+
+    if numero_car_original != numero_car:
+        logger.info(f"[WS] Número CAR normalizado de '{numero_car_original}' para '{numero_car}'")
+
+    # Validar formato básico
+    if not validar_formato_car(numero_car):
+        logger.warning(f"[WS] Número CAR com formato suspeito: {numero_car}")
+
     await websocket.accept()
     print(f"=== [WS] WebSocket aceita para CAR: {numero_car} ===\n")
     logger.info(f"[WS] WebSocket aceita para CAR: {numero_car}")
@@ -142,7 +155,7 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
         # Callback para resolver CAPTCHA remotamente
         async def resolver_captcha_remoto(image_bytes: bytes) -> str:
             """Envia CAPTCHA para frontend e aguarda resposta"""
-            logger.info("CAPTCHA detectado, enviando para cliente...")
+            logger.info(f"CAPTCHA detectado, enviando para cliente {cliente_id}...")
 
             # Converter para base64
             img_base64 = base64.b64encode(image_bytes).decode('utf-8')
@@ -162,7 +175,7 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
                 if not captcha_text:
                     raise ValueError("CAPTCHA text não fornecido")
 
-                logger.info(f"CAPTCHA recebido: {captcha_text}")
+                logger.info(f"CAPTCHA recebido do cliente {cliente_id}: {captcha_text}")
                 return captcha_text
 
             except asyncio.TimeoutError:
@@ -211,37 +224,48 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
 
         logger.info("Download concluído, processando resultados...")
 
+        # VALIDAÇÃO CRÍTICA: Shapefile é OBRIGATÓRIO!
+        if not resultados.get("arquivo_shapefile"):
+            logger.error("❌ ERRO CRÍTICO: Shapefile não foi baixado!")
+            logger.error(f"❌ Cliente: {cliente_id} | CAR: {numero_car}")
+            raise Exception("Shapefile é obrigatório mas não foi baixado. Verifique se o CAPTCHA foi digitado corretamente.")
+
         # Upload do shapefile para Supabase Storage
         shapefile_url = None
         shapefile_size = None
 
-        if resultados.get("arquivo_shapefile"):
-            logger.info("Fazendo upload do shapefile para Supabase Storage...")
+        logger.info("Fazendo upload do shapefile para Supabase Storage...")
 
-            try:
-                with open(resultados["arquivo_shapefile"], "rb") as f:
-                    shapefile_bytes = f.read()
+        try:
+            with open(resultados["arquivo_shapefile"], "rb") as f:
+                shapefile_bytes = f.read()
 
-                # Path no storage: {cliente_id}/{numero_car}/shapefile.zip
-                storage_path = f"{cliente_id}/{numero_car}/shapefile.zip"
+            # Path no storage: {cliente_id}/{numero_car}/shapefile.zip
+            storage_path = f"{cliente_id}/{numero_car}/shapefile.zip"
 
-                # Upload para storage
-                storage = supabase_client.storage.from_("car-shapefiles")
-                storage.upload(
-                    storage_path,
-                    shapefile_bytes,
-                    {"content-type": "application/zip", "upsert": "true"}
-                )
+            # Upload para storage
+            storage = supabase_client.storage.from_("car-shapefiles")
+            storage.upload(
+                storage_path,
+                shapefile_bytes,
+                {"content-type": "application/zip", "upsert": "true"}
+            )
 
-                # Obter URL pública
-                shapefile_url = storage.get_public_url(storage_path)
-                shapefile_size = len(shapefile_bytes)
+            # Obter URL pública
+            shapefile_url = storage.get_public_url(storage_path)
+            shapefile_size = len(shapefile_bytes)
 
-                logger.info(f"Shapefile uploaded: {shapefile_url}")
+            logger.info(f"Shapefile uploaded: {shapefile_url}")
 
-            except Exception as e:
-                logger.error(f"Erro ao fazer upload do shapefile: {e}")
-                # Não falhar a consulta se o upload falhar
+        except Exception as e:
+            logger.error(f"Erro ao fazer upload do shapefile: {e}")
+            raise Exception(f"Erro crítico ao fazer upload do shapefile: {e}")
+
+        # VALIDAÇÃO: GeoJSON layers também são obrigatórios
+        if not resultados.get("geojson_layers") or len(resultados.get("geojson_layers", {})) == 0:
+            logger.error("❌ ERRO CRÍTICO: GeoJSON layers não foram extraídos do shapefile!")
+            logger.error(f"❌ Cliente: {cliente_id} | CAR: {numero_car}")
+            raise Exception("GeoJSON layers são obrigatórios mas não foram extraídos do shapefile")
 
         # Atualizar registro no Supabase (dados já foram salvos, só atualizar shapefile, geojson e status)
         logger.info("Atualizando registro no Supabase com shapefile e GeoJSON layers...")
@@ -278,31 +302,45 @@ async def websocket_car_download(websocket: WebSocket, numero_car: str):
 
     except Exception as e:
         logger.error(f"Erro no processamento do CAR {numero_car}: {e}", exc_info=True)
+        logger.error(f"🔍 INFORMAÇÕES DO ERRO - Cliente ID: {cliente_id}, CAR: {numero_car}, Consulta ID: {consulta_id}")
 
-        # Verificar se é erro no CAPTCHA/shapefile (dados do demonstrativo já foram salvos)
+        # SEMPRE marcar como ERRO se não tiver shapefile
+        # Shapefile é OBRIGATÓRIO para o mapa funcionar!
         erro_msg = str(e).lower()
-        if consulta_id:
-            if "captcha" in erro_msg or "shapefile" in erro_msg:
-                # Erro só no shapefile, dados do demonstrativo já estão salvos
-                logger.warning("Erro no shapefile, mas dados do demonstrativo já foram salvos")
-                supabase_client.table("duploa_consultas_car").update({
-                    "status": "concluido_sem_shapefile",
-                    "erro_mensagem": f"Shapefile não baixado: {str(e)}",
-                    "consulta_concluida_em": datetime.utcnow().isoformat()
-                }).eq("id", consulta_id).execute()
-            else:
-                # Erro geral antes de salvar dados
-                supabase_client.table("duploa_consultas_car").update({
-                    "status": "erro",
-                    "erro_mensagem": str(e),
-                    "consulta_concluida_em": datetime.utcnow().isoformat()
-                }).eq("id", consulta_id).execute()
 
-        # Enviar erro para cliente
+        if consulta_id:
+            # Mensagem de erro apropriada
+            mensagem_erro = str(e)
+
+            # Se for erro de CAPTCHA/shapefile, mensagem específica
+            if "captcha" in erro_msg or "shapefile" in erro_msg:
+                logger.error(f"⚠️ FALHA CRÍTICA SHAPEFILE - Cliente: {cliente_id} | CAR: {numero_car}")
+                logger.error(f"   Erro: {str(e)}")
+
+                # Verificar se foi erro de CAPTCHA
+                if "captcha" in erro_msg:
+                    mensagem_erro = "❌ ERRO: CAPTCHA incorreto ou shapefile não foi baixado. Por favor, tente novamente e digite o CAPTCHA com atenção."
+                else:
+                    mensagem_erro = f"❌ ERRO: Shapefile obrigatório não foi baixado. {str(e)}"
+
+            # SEMPRE marca como ERRO (nunca "concluido_sem_shapefile")
+            supabase_client.table("duploa_consultas_car").update({
+                "status": "erro",
+                "erro_mensagem": mensagem_erro,
+                "consulta_concluida_em": datetime.utcnow().isoformat()
+            }).eq("id", consulta_id).execute()
+
+        # Enviar erro para cliente com mensagem clara
         try:
+            # Mensagem amigável para o usuário
+            if "captcha" in erro_msg or "shapefile" in erro_msg:
+                mensagem_usuario = "❌ Falha no download do shapefile. Isso geralmente acontece quando o CAPTCHA foi digitado incorretamente. Por favor, tente novamente prestando atenção ao CAPTCHA."
+            else:
+                mensagem_usuario = str(e)
+
             error_msg = ErrorMessage(
-                message=str(e),
-                details=f"Erro ao processar CAR: {numero_car}"
+                message=mensagem_usuario,
+                details=f"CAR: {numero_car} | Cliente: {cliente_id}"
             )
             await websocket.send_json(error_msg.model_dump())
         except:
